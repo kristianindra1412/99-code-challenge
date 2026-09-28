@@ -70,7 +70,7 @@ External payment providers operate in unreliable environments (network retries, 
 ### 2. Callback Amount Mismatch Policy
 - **Scenario**: A deposit was created for `100.00`, but the callback reports `amount: "150.00"` or `"50.00"`.
 - **Policy**: The transaction is marked `failed` with `failure_reason = 'amount_mismatch'`. No funds are credited to the wallet, and no ledger entry is created.
-- **Rationale**: Auto-crediting the callback amount risks crediting fraudulent or misattributed funds. Auto-crediting the original amount creates accounting discrepancies against actual PSP settlements. Halting the transaction and requiring operational/reconciliation review is the only safe financial approach.
+- **Rationale**: Auto-crediting the callback amount risks crediting fraudulent or misattributed funds. Auto-crediting the original amount creates accounting discrepancies against actual PSP settlements. Halting the transaction and requiring operational/reconciliation review is the safest financial approach.
 
 ### 3. Unknown `pspRef`
 Callbacks referencing an unknown `pspRef` return `404 Not Found`. Records are never created dynamically from incoming webhooks, preventing malicious injection of arbitrary records.
@@ -109,15 +109,43 @@ This allows frontends and support teams to display the exact remaining turnover 
 
 ---
 
-## 6. AI Disclosure
+## 6. Assumptions & Framing Missing Constraints
 
-In accordance with repo instructions:
-- **Tool Usage**: AI tools were used during development to assist with initial boilerplate generation (Sequelize migration templates, Zod schema typing) and brainstorming edge cases for test coverage (such as 18-decimal micro-unit boundary tests).
-- **Ownership**: All architectural decisions (pessimistic locking over OCC, dual-state ledger design, deadlock prevention hierarchy, amount mismatch handling policy, and adapter architecture in Part B) were authored, evaluated, and verified directly.
+The challenge leaves several real-world gaps. The following assumptions were framed and built directly into the system:
+
+1. **Callback Amount Discrepancies**:
+   - *Gap*: The prompt notes callback amount may differ from deposit amount without prescribing action.
+   - *Assumption*: Discrepancies are treated as security/accounting exceptions. The transaction transitions to `failed` (`failure_reason = 'amount_mismatch'`), halting with zero wallet credit or ledger write. Discrepancies must be investigated by operations.
+2. **Unknown `pspRef` Ingress**:
+   - *Gap*: Callbacks may send an unknown reference.
+   - *Assumption*: Return HTTP 404. Creating placeholder records from unauthenticated external webhooks introduces an injection vector for phantom transactions.
+3. **Withdrawal Balance Timing (Escrow vs Pending)**:
+   - *Gap*: Withdrawals enter a `pending` state awaiting manual approval.
+   - *Assumption*: Wallet balance is debited immediately into escrow. Allowing funds to remain available while awaiting approval would permit players to wager away money already requested for cashout. If declined later, a compensating credit restores the balance.
+4. **Cumulative Turnover Accumulation**:
+   - *Gap*: How turnover requirements compound across multiple deposits and wagers.
+   - *Assumption*: Turnover requirements aggregate cumulatively on the wallet (`required_turnover += deposit * multiplier`, `accrued_turnover += wager`). A member can withdraw whenever `accrued_turnover >= required_turnover`. Wagers do not reset after a withdrawal in this starter scope.
+5. **Terminal State Immutability**:
+   - *Gap*: Handling callbacks arriving out of order or after a transaction was marked failed/completed.
+   - *Assumption*: Terminal states are irreversible. To stop PSP webhook retry loops, subsequent deliveries return HTTP 200 with `{ idempotent: true }` but perform zero database mutations.
+6. **Decimal Precision Boundaries**:
+   - *Gap*: Format and limits on string decimals.
+   - *Assumption*: Adhere to `DECIMAL(36, 18)` throughout the stack. Inputs with more than 18 decimal places, negative numbers, or non-decimal formatting are rejected at the Zod boundary.
 
 ---
 
-## 7. Production Roadmap
+## 7. AI Tool Disclosure & Time Spent
+
+In accordance with repo instructions, I want to be honest and straightforward about the tools used and time spent on this project:
+
+- **Tools Used**: Antigravity and Gemini Flash.
+- **Time Spent**: Completed within approximately 4 hours of active work, with some breaks (including a lunch break) in between.
+- **Brainstorming & Acceleration**: Used to accelerate development by brainstorming solutions, generating code implementations according to the proposed architecture, and assisting in constructing verification test cases (including concurrency stress tests and edge cases).
+- **Review & Alignment**: All planning, generated code, and test outputs were thoroughly reviewed, edited, and corrected to ensure they aligned with the architectural plan, financial correctness rules, and repository conventions.
+
+---
+
+## 8. Production Roadmap
 
 Given additional time and production scope, the following improvements would be prioritized:
 
