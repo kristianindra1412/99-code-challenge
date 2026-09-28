@@ -1,8 +1,8 @@
 import { sequelize } from '../sequelize';
 import { Member, initMember } from './member';
 import { Wallet, initWallet } from './wallet';
-import { FundingTransaction, initFundingTransaction } from './fundingTransaction';
-import { WalletTx, initWalletTx } from './walletTx';
+import { FundingTransaction, initFundingTransaction, FundingTransactionType, FundingTransactionStatus } from './fundingTransaction';
+import { WalletTx, initWalletTx, WalletTxType, WalletTxDirection } from './walletTx';
 
 initMember(sequelize);
 initWallet(sequelize);
@@ -26,4 +26,13 @@ WalletTx.belongsTo(Wallet, { foreignKey: 'walletId', as: 'wallet' });
 FundingTransaction.hasOne(WalletTx, { foreignKey: 'fundingTxId', as: 'ledgerEntry' });
 WalletTx.belongsTo(FundingTransaction, { foreignKey: 'fundingTxId', as: 'fundingTransaction' });
 
-export { Member, Wallet, FundingTransaction, WalletTx };
+export {
+  Member,
+  Wallet,
+  FundingTransaction,
+  WalletTx,
+  FundingTransactionType,
+  FundingTransactionStatus,
+  WalletTxType,
+  WalletTxDirection,
+};
