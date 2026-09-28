@@ -16,23 +16,37 @@ All provider-specific code lives exclusively in an **isolated adapter layer at t
 
 ## 2. Architecture & Data Flow
 
-```mermaid
-flowchart LR
-    Webhook["Provider Webhook<br/>(POST /psp/callbacks/:provider)"] --> Router["Express PSP Router"]
-    Router --> Registry["PspRegistry.get(provider)"]
-    Registry --> Adapter["Provider Adapter<br/>(implements IPspAdapter)"]
-    
-    subgraph AdapterBoundary["Adapter Boundary (Junior Scope)"]
-        Adapter --> V["1. verifySignature(headers, rawBody)"]
-        V -->|Valid| N["2. normalizeWebhook(body, headers)"]
-    end
-    
-    subgraph CoreEngine["Core Financial Engine (Untouched)"]
-        N --> Event["Normalized Event<br/>{ pspRef, status, amount }"]
-        Event --> Core["handlePspCallback()<br/>• Row lock (FOR UPDATE)<br/>• Idempotency check<br/>• Wallet credit & ledger entry"]
-    end
-    
-    V -->|Invalid| Err["401 Unauthorized"]
+```text
+[ Incoming Webhook ]
+  POST /psp/callbacks/:provider
+         |
+         v
+[ Express Dispatcher ]
+         |
+         v
++---------------------------------------------------------------+
+| Adapter Boundary (Junior Engineer Scope)                      |
+|                                                               |
+|  1. verifySignature(headers, rawBody)                         |
+|     |-- Invalid --> Return 401 Unauthorized (halts early)     |
+|     \-- Valid   --> Continue                                  |
+|                                                               |
+|  2. normalizeWebhook(body, headers)                           |
+|     \-- Maps provider quirks (cents to dollars, status enum)  |
+|         into Canonical Domain Event:                          |
+|         { pspRef, status: "completed" | "failed", amount }    |
++---------------------------------------------------------------+
+         |
+         v
++---------------------------------------------------------------+
+| Core Financial Engine (Untouched & Reused)                    |
+|                                                               |
+|  handlePspCallback(event)                                     |
+|  |-- 1. Acquire DB row lock (SELECT ... FOR UPDATE)           |
+|  |-- 2. Idempotency guard (ignores duplicate retries)         |
+|  |-- 3. Exactly-once wallet credit                            |
+|  \-- 4. Append-only ledger audit entry                        |
++---------------------------------------------------------------+
 ```
 
 ---
