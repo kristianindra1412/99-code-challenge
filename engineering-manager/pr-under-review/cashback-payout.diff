@@ -1,0 +1,216 @@
+diff --git a/src/db/migrations/20260710000003-create-cashback-payouts.js b/src/db/migrations/20260710000003-create-cashback-payouts.js
+new file mode 100644
+index 0000000..a1f2c3d
+--- /dev/null
++++ b/src/db/migrations/20260710000003-create-cashback-payouts.js
+@@ -0,0 +1,27 @@
++'use strict';
++
++module.exports = {
++  async up(queryInterface, Sequelize) {
++    await queryInterface.createTable('cashback_payouts', {
++      id: {
++        type: Sequelize.UUID,
++        primaryKey: true,
++        defaultValue: Sequelize.literal('gen_random_uuid()'),
++      },
++      member_id: {
++        type: Sequelize.UUID,
++        allowNull: false,
++        references: { model: 'members', key: 'id' },
++      },
++      amount: { type: Sequelize.FLOAT, allowNull: false },
++      week_start: { type: Sequelize.DATE, allowNull: false },
++      created_at: { type: Sequelize.DATE, allowNull: false, defaultValue: Sequelize.literal('now()') },
++      updated_at: { type: Sequelize.DATE, allowNull: false, defaultValue: Sequelize.literal('now()') },
++    });
++  },
++
++  async down(queryInterface) {
++    await queryInterface.dropTable('cashback_payouts');
++  },
++};
+diff --git a/src/db/models/cashbackPayout.ts b/src/db/models/cashbackPayout.ts
+new file mode 100644
+index 0000000..b2e4d5f
+--- /dev/null
++++ b/src/db/models/cashbackPayout.ts
+@@ -0,0 +1,24 @@
++import { DataTypes, Model, Sequelize } from 'sequelize';
++
++export class CashbackPayout extends Model {
++  declare id: string;
++  declare memberId: string;
++  declare amount: number;
++  declare weekStart: Date;
++}
++
++export function initCashbackPayout(sequelize: Sequelize): void {
++  CashbackPayout.init(
++    {
++      id: { type: DataTypes.UUID, defaultValue: DataTypes.UUIDV4, primaryKey: true },
++      memberId: { type: DataTypes.UUID, allowNull: false },
++      amount: { type: DataTypes.FLOAT, allowNull: false },
++      weekStart: { type: DataTypes.DATE, allowNull: false },
++    },
++    { sequelize, tableName: 'cashback_payouts', underscored: true },
++  );
++}
+diff --git a/src/services/cashbackService.ts b/src/services/cashbackService.ts
+new file mode 100644
+index 0000000..c3f5e6a
+--- /dev/null
++++ b/src/services/cashbackService.ts
+@@ -0,0 +1,62 @@
++import { Op } from 'sequelize';
++import { Member, Wallet, WalletTx, Bet, CashbackPayout } from '../db/models';
++
++const CASHBACK_RATE = 0.05; // 5% weekly cashback on net losses
++
++export interface CashbackRunResult {
++  processed: number;
++  paid: number;
++}
++
++export async function runWeeklyCashback(accountId: string): Promise<CashbackRunResult> {
++  const weekStart = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000);
++
++  const members = await Member.findAll();
++
++  let processed = 0;
++  let paid = 0;
++
++  for (const member of members) {
++    processed++;
++    try {
++      const bets = await Bet.findAll({
++        where: { memberId: member.id, createdAt: { [Op.gte]: weekStart } },
++      });
++
++      let netLoss = 0;
++      for (const bet of bets) {
++        netLoss += parseFloat(bet.amount) - parseFloat(bet.payout);
++      }
++
++      if (netLoss <= 0) {
++        continue;
++      }
++
++      const cashback = netLoss * CASHBACK_RATE;
++
++      const wallet = await Wallet.findOne({ where: { memberId: member.id } });
++      if (!wallet) {
++        continue;
++      }
++
++      wallet.balance = String(parseFloat(wallet.balance) + cashback);
++      await wallet.save();
++
++      await CashbackPayout.create({
++        memberId: member.id,
++        amount: cashback,
++        weekStart,
++      });
++
++      await WalletTx.create({
++        walletId: wallet.id,
++        type: 'CashbackCredit',
++        amount: String(cashback),
++      });
++
++      paid++;
++    } catch (err) {
++      console.log('cashback failed for member', member.id, err);
++    }
++  }
++
++  return { processed, paid };
++}
+diff --git a/src/routes/admin.ts b/src/routes/admin.ts
+new file mode 100644
+index 0000000..d4a6f7b
+--- /dev/null
++++ b/src/routes/admin.ts
+@@ -0,0 +1,20 @@
++import { Router } from 'express';
++import { z } from 'zod';
++import { runWeeklyCashback } from '../services/cashbackService';
++
++export const adminRouter = Router();
++
++const runCashbackBody = z.object({
++  accountId: z.string().uuid(),
++});
++
++adminRouter.post('/cashback/run', async (req, res, next) => {
++  try {
++    const body = runCashbackBody.parse(req.body);
++    const result = await runWeeklyCashback(body.accountId);
++    res.json({ ok: true, ...result });
++  } catch (err) {
++    next(err);
++  }
++});
+diff --git a/src/app.ts b/src/app.ts
+index e5b7c8d..f6c9d0e 100644
+--- a/src/app.ts
++++ b/src/app.ts
+@@ -1,6 +1,7 @@
+ import express, { ErrorRequestHandler } from 'express';
+ import { ZodError } from 'zod';
+ import { healthRouter } from './routes/health';
++import { adminRouter } from './routes/admin';
+ import { membersRouter } from './routes/members';
+@@ -18,6 +19,7 @@ export function createApp() {
+
+   app.use('/health', healthRouter);
+   app.use('/members', membersRouter);
++  app.use('/admin', adminRouter);
+
+   app.use(errorHandler);
+   return app;
+diff --git a/test/cashback.test.ts b/test/cashback.test.ts
+new file mode 100644
+index 0000000..a7b8c9d
+--- /dev/null
++++ b/test/cashback.test.ts
+@@ -0,0 +1,38 @@
++import { runWeeklyCashback } from '../src/services/cashbackService';
++import { Member, Wallet, WalletTx, Bet, CashbackPayout } from '../src/db/models';
++
++jest.mock('../src/db/models', () => ({
++  Member: { findAll: jest.fn() },
++  Wallet: { findOne: jest.fn() },
++  WalletTx: { create: jest.fn() },
++  Bet: { findAll: jest.fn() },
++  CashbackPayout: { create: jest.fn() },
++}));
++
++describe('runWeeklyCashback', () => {
++  it('pays cashback to losing members', async () => {
++    (Member.findAll as jest.Mock).mockResolvedValue([{ id: 'm1' }]);
++    (Bet.findAll as jest.Mock).mockResolvedValue([
++      { amount: '100', payout: '40' },
++    ]);
++    const save = jest.fn();
++    (Wallet.findOne as jest.Mock).mockResolvedValue({
++      id: 'w1',
++      balance: '10',
++      save,
++    });
++
++    const result = await runWeeklyCashback('acc1');
++
++    expect(result.paid).toBe(1);
++    expect(save).toHaveBeenCalled();
++    expect(CashbackPayout.create).toHaveBeenCalled();
++    expect(WalletTx.create).toHaveBeenCalled();
++  });
++
++  it('skips winning members', async () => {
++    (Member.findAll as jest.Mock).mockResolvedValue([{ id: 'm1' }]);
++    (Bet.findAll as jest.Mock).mockResolvedValue([{ amount: '10', payout: '50' }]);
++    const result = await runWeeklyCashback('acc1');
++    expect(result.paid).toBe(0);
++  });
++});
