@@ -18,7 +18,7 @@ afterAll(async () => {
   await sequelize.close();
 });
 
-describe('Phase 4: Full Financial Lifecycle & End-to-End Business Flows (test/flow.test.ts)', () => {
+describe('Financial Lifecycle & End-to-End Flow Suite', () => {
   // Helper to create a test member and their wallet via POST /members
   async function createTestMember(username: string) {
     const res = await request(app).post('/members').send({ username });

@@ -13,7 +13,7 @@ afterAll(async () => {
   await sequelize.close();
 });
 
-describe('Phase 1 Models & Migrations', () => {
+describe('Models & Migrations Suite', () => {
   describe('FundingTransaction Model & Constraints', () => {
     it('creates a funding transaction with defaults and associations', async () => {
       const member = await Member.create({ username: 'bob01' });

@@ -27,7 +27,7 @@ afterAll(async () => {
   await sequelize.close();
 });
 
-describe('Phase 2: Domain Services & Concurrency Engine', () => {
+describe('Domain Services Suite', () => {
   describe('createDeposit Service', () => {
     it('creates a pending funding transaction with valid parameters', async () => {
       const { member } = await createMember('alice_dep');

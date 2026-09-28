@@ -20,7 +20,7 @@ afterAll(async () => {
   await sequelize.close();
 });
 
-describe('Phase 4: Concurrency Engine & Race Condition Stress Suite (test/concurrency.test.ts)', () => {
+describe('Concurrency Engine & Race Condition Stress Suite', () => {
   // Helper to create member + wallet
   async function createMemberWithWallet(username: string) {
     const res = await request(app).post('/members').send({ username });

@@ -18,7 +18,7 @@ afterAll(async () => {
   await sequelize.close();
 });
 
-describe('Phase 3 API Routes & Validation', () => {
+describe('API Routes & Validation Suite', () => {
   // Helper to create a member with wallet
   async function setupMember(username = 'tester01') {
     const { member, wallet } = await memberService.createMember(username);
